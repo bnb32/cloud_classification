@@ -112,8 +112,19 @@ def load_data(encode_flag=True):
     return df
 
 
+def int_or_none(arg):
+    if str(arg) == 'None':
+        return None
+    else:
+        try:
+            arg = int(arg)
+            return arg
+        except:
+            raise TypeError
+    
+
 def sample_df(df, samples=None):
-    if str(samples) != 'None':
+    if samples is not None:
         df_samp = df.sample(n=samples)
     else:
         df_samp = df
@@ -400,9 +411,9 @@ def batch_run(samples=None, n_estimators=500, max_depth=20, test_size=0.2, featu
     print(f'mean_accuracy: {mean_accuracy}')
     print(f'score: {score}')
     
-    csv_file = os.path.join(working_dir, 'batch_model_info.csv')
+    csv_file = os.path.join(output_dir, 'batch_model_info.csv')
     if os.path.exists(csv_file):
-        model_info.to_csv(csv_file, mode='a')
+        model_info.to_csv(csv_file, mode='a', header=False)
     else:
         model_info.to_csv(csv_file)
     
@@ -419,8 +430,8 @@ if __name__=='__main__':
     parser.add_argument('--grid_search', action='store_true')
     parser.add_argument('--batch_run', action='store_true')
     parser.add_argument('--batch_search', action='store_true')
-    parser.add_argument('-samples', default=None, type=int)
-    parser.add_argument('-param_id', default=None, type=int)
+    parser.add_argument('-samples', default=None, type=int_or_none)
+    parser.add_argument('-param_id', default=None, type=int_or_none)
     args = parser.parse_args()
     
     if args.model_info:

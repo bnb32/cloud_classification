@@ -9,6 +9,4 @@
 
 module load conda
 
-mkdir -p ./logs
-
 srun /home/bbenton/miniconda3/envs/nsrdb/bin/python cloud_classification.py --batch_run -param_id $1 -samples $2
