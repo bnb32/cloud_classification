@@ -25,6 +25,8 @@ import joblib
 
 from nsrdb.utilities.statistics import mae_perc, mbe_perc
 
+working_dir = '/projects/pxs/mlclouds/cloud_id/bnb/'
+
 cloud_map = {'clearsky': 0, 'water': 1, 'ice': 2}
 
 features = [
@@ -55,9 +57,21 @@ features = [
     'cld_opd_mlclouds',
 ]
 
+
 feature_sets = [features, features[:-6], features[:-1], features[:-2]]
+n_estimators = [2500, 3000]
+max_depth = [45, 50]
 
-
+param_dict = {}
+i=0
+for n in n_estimators:
+    for m in max_depth:
+        for f in feature_sets:
+            param_dict[i] = {'n_estimators': n,
+                             'max_depth': m,
+                             'features': f}
+            i+=1
+            
 def plot_cm(cm, title='Confusion Matrix'):
     ax = plt.subplot()
     sns.heatmap(cm, annot=True, fmt='g', ax=ax)
@@ -87,9 +101,8 @@ def from_np_array(array_string):
 
 def load_data(encode_flag=True):
     
-    data_dir = '/projects/pxs/mlclouds/cloud_id/bnb'
     file_name = 'mlclouds_all_data.csv'
-    file_path = os.path.join(data_dir, file_name)
+    file_path = os.path.join(working_dir, file_name)
     df = pd.read_csv(file_path)
     
     if encode_flag:
@@ -256,7 +269,8 @@ def train_model(samples=None, max_depth=10, n_estimators=500, features=features[
     print('saved model: ./model.pkl')
     
     return pipe
-    
+
+
 def output_model_info_csv(samples=None, test_size=0.2):
     
     df = load_data()
@@ -269,8 +283,11 @@ def output_model_info_csv(samples=None, test_size=0.2):
     model_info = pd.DataFrame()
     
     models = []
-    n_estimators = [500, 1000, 1500]
-    max_depth = [10, 15, 20, 25, 30]
+
+    global n_estimators
+    global max_depth
+    global feature_sets
+    
     for n in n_estimators:
         for m in max_depth:
             models.append(xgb.XGBClassifier(n_estimators=n, max_depth=m, use_label_encoder=False, eval_metric='merror'))
@@ -324,6 +341,65 @@ def output_model_info_csv(samples=None, test_size=0.2):
     print(f'writing csv: {csv_file}')
     model_info.to_csv(csv_file)
     
+def batch_run_csv(samples=None, n_estimators=500, max_depth=20, test_size=0.2, features=features[:-1]):
+    
+    df = load_data()
+    
+    if samples is not None:
+        df_samp = df.sample(n=samples)
+    else:
+        df_samp = df
+
+    model_info = pd.DataFrame()
+    
+    model = xgb.XGBClassifier(n_estimators=n_estimators, max_depth=max_depth, use_label_encoder=False, eval_metric='merror')
+        
+    X_train, X_test, y_train, y_test = split_data(df_samp, features, test_size)
+        
+    pipe = Pipeline([('scaler', StandardScaler()),
+                     ('model', model)])
+  
+
+    pipe.fit(X_train, y_train)
+    y_pred = pipe.predict(X_test)
+    cm = confusion_matrix(y_test, y_pred)
+    cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+    mae = mae_perc(y_test, y_pred)
+            
+    y_pred_binary = np.array([0 if y==0 else 1 for y in y_pred])
+    y_test_binary = np.array([0 if y==0 else 1 for y in y_test])
+            
+    binary_cm = confusion_matrix(y_test_binary, y_pred_binary)
+    binary_cm = binary_cm.astype('float') / binary_cm.sum(axis=1)[:, np.newaxis]
+            
+    params = model.get_params()
+    n_estimators = params.get('n_estimators', None)
+    max_depth = params.get('max_depth', None)
+            
+    title = f'xgb_max_depth_{max_depth}'
+    title += f'_n_estimators_{n_estimators}_n_features_{len(f)}'
+    mean_accuracy = np.mean([cm[i][i] for i in range(cm.shape[0])])
+    binary_mean_accuracy = np.mean([binary_cm[i][i] for i in range(binary_cm.shape[0])])
+    new_row = {
+               'n_estimators': n_estimators,
+               'max_depth': max_depth,
+               'title': title,
+               'model': model.__class__.__name__,
+               'features': len(f),                       
+               'mae': mae,
+               'score': pipe.score(X_test, y_test),
+               'confusion_matrix': np.array(cm),
+               'binary_confusion_matrix': np.array(binary_cm),
+               'mean_accuracy': mean_accuracy,
+               'binary_mean_accuracy': binary_mean_accuracy}
+    model_info = model_info.append(new_row, ignore_index=True)
+    
+    csv_file = os.path.join(working_dir, 'batch_model_info.csv')
+    if os.path.exists(csv_file):
+        model_info.to_csv(csv_file, mode='a')
+    else:
+        model_info.to_csv(csv_file)
+    
 def load_model_info_csv():
     df = pd.read_csv('./model_info.csv')
     df['confusion_matrix'] = df['confusion_matrix'].apply(from_np_array)
@@ -335,7 +411,10 @@ if __name__=='__main__':
     parser.add_argument('--model_info', action='store_true')
     parser.add_argument('--new_csv', action='store_true')
     parser.add_argument('--grid_search', action='store_true')
+    parser.add_argument('--batch_run', action='store_true')
+    parser.add_argument('--batch_search', action='store_true')
     parser.add_argument('-samples', default=None, type=int)
+    parser.add_argument('-param_id', default=None, type=int)
     args = parser.parse_args()
     
     if args.model_info:
@@ -346,3 +425,17 @@ if __name__=='__main__':
 
     if args.grid_search:
         tune_parameters(samples=args.samples)
+        
+    if args.batch_run:
+        params = param_dict[args.param_id]
+        n_estimators = params['n_estimators']
+        max_depth = params['max_depth']
+        features = params['features']
+        batch_run_csv(n_estimators=n_estimators,
+                      max_depth=max_depth,
+                      features=features)
+        
+    if args.batch_search:
+        for id_ in param_dict:
+            os.system(f'bash ./batch_script.sh {id_}')
+            
