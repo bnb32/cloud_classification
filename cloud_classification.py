@@ -26,6 +26,7 @@ import joblib
 from nsrdb.utilities.statistics import mae_perc, mbe_perc
 
 working_dir = '/projects/pxs/mlclouds/cloud_id/bnb/'
+output_dir = '/projects/pxs/mlclouds/cloud_id/bnb/output'
 
 cloud_map = {'clearsky': 0, 'water': 1, 'ice': 2}
 
@@ -59,8 +60,8 @@ features = [
 
 
 feature_sets = [features, features[:-6], features[:-1], features[:-2]]
-n_estimators = [2500, 3000]
-max_depth = [45, 50]
+n_estimators = [1500, 2000, 2500, 3000, 3500]
+max_depth = [30, 35, 40, 45, 50, 55, 60]
 
 param_dict = {}
 i=0
@@ -112,7 +113,7 @@ def load_data(encode_flag=True):
 
 
 def sample_df(df, samples=None):
-    if samples is not None:
+    if str(samples) != 'None':
         df_samp = df.sample(n=samples)
     else:
         df_samp = df
@@ -322,6 +323,7 @@ def output_model_info_csv(samples=None, test_size=0.2):
             title += f'_n_estimators_{n_estimators}_n_features_{len(f)}'
             mean_accuracy = np.mean([cm[i][i] for i in range(cm.shape[0])])
             binary_mean_accuracy = np.mean([binary_cm[i][i] for i in range(binary_cm.shape[0])])
+            score = pipe.score(X_test, y_test)
             new_row = {
                        'n_estimators': n_estimators,
                        'max_depth': max_depth,
@@ -329,7 +331,7 @@ def output_model_info_csv(samples=None, test_size=0.2):
                        'model': model.__class__.__name__,
                        'features': len(f),                       
                        'mae': mae,
-                       'score': pipe.score(X_test, y_test),
+                       'score': score,
                        'confusion_matrix': np.array(cm),
                        'binary_confusion_matrix': np.array(binary_cm),
                        'mean_accuracy': mean_accuracy,
@@ -341,7 +343,7 @@ def output_model_info_csv(samples=None, test_size=0.2):
     print(f'writing csv: {csv_file}')
     model_info.to_csv(csv_file)
     
-def batch_run_csv(samples=None, n_estimators=500, max_depth=20, test_size=0.2, features=features[:-1]):
+def batch_run(samples=None, n_estimators=500, max_depth=20, test_size=0.2, features=features[:-1]):
     
     df = load_data()
     
@@ -380,6 +382,7 @@ def batch_run_csv(samples=None, n_estimators=500, max_depth=20, test_size=0.2, f
     title += f'_n_estimators_{n_estimators}_n_features_{len(f)}'
     mean_accuracy = np.mean([cm[i][i] for i in range(cm.shape[0])])
     binary_mean_accuracy = np.mean([binary_cm[i][i] for i in range(binary_cm.shape[0])])
+    score = pipe.score(X_test, y_test)
     new_row = {
                'n_estimators': n_estimators,
                'max_depth': max_depth,
@@ -387,12 +390,15 @@ def batch_run_csv(samples=None, n_estimators=500, max_depth=20, test_size=0.2, f
                'model': model.__class__.__name__,
                'features': len(f),                       
                'mae': mae,
-               'score': pipe.score(X_test, y_test),
+               'score': score,
                'confusion_matrix': np.array(cm),
                'binary_confusion_matrix': np.array(binary_cm),
                'mean_accuracy': mean_accuracy,
                'binary_mean_accuracy': binary_mean_accuracy}
     model_info = model_info.append(new_row, ignore_index=True)
+    print(f'Added {new_row["title"]}')
+    print(f'mean_accuracy: {mean_accuracy}')
+    print(f'score: {score}')
     
     csv_file = os.path.join(working_dir, 'batch_model_info.csv')
     if os.path.exists(csv_file):
@@ -431,11 +437,12 @@ if __name__=='__main__':
         n_estimators = params['n_estimators']
         max_depth = params['max_depth']
         features = params['features']
-        batch_run_csv(n_estimators=n_estimators,
-                      max_depth=max_depth,
-                      features=features)
+        batch_run(n_estimators=n_estimators,
+                  max_depth=max_depth,
+                  features=features,
+                  samples=args.samples)
         
     if args.batch_search:
         for id_ in param_dict:
-            os.system(f'bash ./batch_script.sh {id_}')
+            os.system(f'sbatch ./batch_script.sh {id_} {args.samples}')
             
