@@ -97,6 +97,7 @@ def plot_binary_cm(cm, title='Confusion Matrix'):
 
 def from_np_array(array_string):
     array_string = ','.join(array_string.replace('[ ', '[').split())
+    array_string = array_string.replace('\n', ',')
     return np.array(ast.literal_eval(array_string))
 
 
@@ -159,13 +160,17 @@ def tune_parameters(test_size=0.2, features=features[:-1], samples=None):
         f.write(msg)
     f.close()    
 
-def output_new_csv(test_size=0.2, n_estimators=1500, max_depth=20, features=features[:-1], samples=None):
+def output_new_csv(test_size=0.2, n_estimators=2500, max_depth=30, features=features[:-2], samples=None):
     
-    pipe = train_model(samples=samples, max_depth=max_depth,
-                       n_estimators=n_estimators,
-                       features=features, test_size=test_size)
+    pipe, X_train, X_test, y_train, y_test = train_model(
+        samples=samples, max_depth=max_depth,
+        n_estimators=n_estimators,
+        features=features, test_size=test_size)
     
-    y_pred_all = pipe.predict(X)
+    y_pred_train = pipe.predict(X_train)
+    y_pred_test = pipe.predict(X_test)
+    mask = ['train'] * len(y_pred_train) + ['test'] * len(y_pred_test)
+    y_pred_all = y_pred_train + y_pred_test
     
     invert_cloud_map = {v: k for k, v in cloud_map.items()}
     y_pred_all = [invert_cloud_map[v] for v in y_pred_all]
@@ -173,6 +178,7 @@ def output_new_csv(test_size=0.2, n_estimators=1500, max_depth=20, features=feat
     reffs = []
     opds = []
     types = []
+    mask = []
     
     print(f'updating csv with xgb fields {time.ctime()}')
     
@@ -196,8 +202,9 @@ def output_new_csv(test_size=0.2, n_estimators=1500, max_depth=20, features=feat
     df['cld_reff_xgb'] = reffs
     df['cloud_type_xgb'] = types
     df['cloud_id_xgb'] = y_pred_all
+    df['mask_xgb'] = mask
 
-    csv_file = './mlclouds_all_data_xgb.csv'
+    csv_file = os.path.join(output_dir, 'mlclouds_all_data_xgb.csv')
     print(f'writing csv: {csv_file}')
     
     df.to_csv(csv_file)
@@ -256,6 +263,12 @@ def train_model(samples=None, max_depth=10, n_estimators=500, features=features[
     start_time = time.time()
     print(f'started training {time.ctime()}')
     
+    print(f'using max_depth={max_depth}, '
+          f'n_estimators={n_estimators}, '
+          f'n_features={len(features)}, '
+          f'test_size={test_size}, ' 
+          f'samples={samples}')
+    
     model = xgb.XGBClassifier(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -277,10 +290,11 @@ def train_model(samples=None, max_depth=10, n_estimators=500, features=features[
     print(f'finished training {time.ctime()}')
     print(f'time elapsed: {time_elapsed}')
     
-    joblib.dump(pipe, './model.pkl')
-    print('saved model: ./model.pkl')
+    model_file = os.path.join(output_dir, 'model.pkl')
+    joblib.dump(pipe, model_file)
+    print(f'saved model: {model_file}')
     
-    return pipe
+    return pipe, X_train, X_test, y_train, y_test
 
 
 def output_model_info_csv(samples=None, test_size=0.2):
@@ -350,7 +364,7 @@ def output_model_info_csv(samples=None, test_size=0.2):
             model_info = model_info.append(new_row, ignore_index=True)
             print(f'Added {new_row["title"]}')
     
-    csv_file = './model_info.csv'
+    csv_file = os.path.join(output_dir, 'model_info.csv')
     print(f'writing csv: {csv_file}')
     model_info.to_csv(csv_file)
     

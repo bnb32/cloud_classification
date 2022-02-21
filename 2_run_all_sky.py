@@ -2,8 +2,11 @@ import numpy as np
 import pandas as pd
 from nsrdb.all_sky.all_sky import all_sky, ALL_SKY_ARGS
 
+import cloud_classification as cc
+
 if __name__ == '__main__':
-    df = pd.read_csv('./mlclouds_all_data_xgb.csv', index_col=0)
+    xgb_csv = os.path.join(cc.output_dir, 'mlclouds_all_data_xgb.csv')
+    df = pd.read_csv(xgb_csv, index_col=0)
 
     ignore = ('cloud_fill_flag',)
 
@@ -23,4 +26,5 @@ if __name__ == '__main__':
         dset_out = dset if cloud_phase is None else f'{cloud_phase}_{dset}'
         df[dset_out] = out[dset].flatten()
 
-    df.to_csv('./mlclouds_all_data_xgb_results.csv')
+    output_xgb_csv = os.path.join(cc.output_dir, 'mlclouds_all_data_xgb_results.csv')    
+    df.to_csv(output_xgb_csv)
