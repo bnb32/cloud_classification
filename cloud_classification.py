@@ -162,45 +162,46 @@ def tune_parameters(test_size=0.2, features=features[:-1], samples=None):
 
 def output_new_csv(test_size=0.2, n_estimators=2500, max_depth=30, features=features[:-2], samples=None):
     
-    pipe, X_train, X_test, y_train, y_test = train_model(
+    print(f'started loading data {time.ctime()}')
+    
+    df = load_data()
+    df = sample_df(df, samples)
+    
+    print(f'finished loading data {time.ctime()}')
+    X_train, X_test, y_train, y_test, indices_train, indices_test = split_data(df, features, test_size) 
+    
+    pipe = train_model(
+        X_train, y_train,
         samples=samples, max_depth=max_depth,
         n_estimators=n_estimators,
         features=features, test_size=test_size)
     
-    y_pred_train = pipe.predict(X_train)
-    y_pred_test = pipe.predict(X_test)
-    mask = ['train'] * len(y_pred_train) + ['test'] * len(y_pred_test)
-    y_pred_all = y_pred_train + y_pred_test
+    y_pred_all = np.zeros((len(indices_train) + len(indices_test)))
+    y_pred_all[indices_train] = pipe.predict(X_train)
+    y_pred_all[indices_test] = pipe.predict(X_test)
+    mask = np.zeros((len(y_pred_all)))
+    mask[indices_train] = 0
+    mask[indices_test] = 1
     
     invert_cloud_map = {v: k for k, v in cloud_map.items()}
-    y_pred_all = [invert_cloud_map[v] for v in y_pred_all]
-    
-    reffs = []
-    opds = []
-    types = []
-    mask = []
+    y_pred_all = np.array([invert_cloud_map[v] for v in y_pred_all])
     
     print(f'updating csv with xgb fields {time.ctime()}')
     
-    for i in range(len(y_pred_all)):
-        if y_pred_all[i] == 'water':
-            opds.append(df.iloc[i]['cld_opd_mlclouds_water'])
-            reffs.append(df.iloc[i]['cld_reff_mlclouds_water'])
-            types.append(2)
-        if y_pred_all[i] == 'ice':
-            opds.append(df.iloc[i]['cld_opd_mlclouds_ice'])
-            reffs.append(df.iloc[i]['cld_reff_mlclouds_ice'])
-            types.append(6)
-        if y_pred_all[i] == 'clearsky':
-            opds.append(0)
-            reffs.append(0)
-            types.append(0)
+    df['cld_opd_xgb'] = 0
+    df['cld_reff_xgb'] = 0
+    df['cloud_type_xgb'] = 0
+    ice_mask = y_pred_all == 'ice'
+    water_mask = y_pred_all == 'water'
+    df.loc[ice_mask, 'cld_opd_xgb'] = df.loc[ice_mask, 'cld_opd_mlclouds_ice']
+    df.loc[ice_mask, 'cld_reff_xgb'] = df.loc[ice_mask, 'cld_reff_mlclouds_ice']
+    df.loc[water_mask, 'cld_opd_xgb'] = df.loc[water_mask, 'cld_opd_mlclouds_water']
+    df.loc[water_mask, 'cld_reff_xgb'] = df.loc[water_mask, 'cld_reff_mlclouds_water']
+    df.loc[ice_mask, 'cloud_type_xgb'] = 6
+    df.loc[water_mask, 'cloud_type_xgb'] = 2
 
     print(f'done updating {time.ctime()}')        
-            
-    df['cld_opd_xgb'] = opds
-    df['cld_reff_xgb'] = reffs
-    df['cloud_type_xgb'] = types
+
     df['cloud_id_xgb'] = y_pred_all
     df['mask_xgb'] = mask
 
@@ -208,14 +209,17 @@ def output_new_csv(test_size=0.2, n_estimators=2500, max_depth=30, features=feat
     print(f'writing csv: {csv_file}')
     
     df.to_csv(csv_file)
-    
-    
-def split_data(df, features, test_size):
+
+def select_features(df, features):    
     X = df[features]
     y = df['nom_cloud_id']
     y = y.replace(cloud_map)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size)
-    return X_train, X_test, y_train, y_test    
+    return X, y
+
+
+def split_data(df, features, test_size):
+    X, y = select_features(df, features)
+    return train_test_split(X, y, np.arange(X.shape[0]), test_size=test_size)   
 
 
 def plot_wisconsin_cm():
@@ -251,14 +255,7 @@ def plot_wisconsin_binary_cm():
     plot_binary_cm(cm, 'Wisconsin Confusion Matrix')
 
     
-def train_model(samples=None, max_depth=10, n_estimators=500, features=features[:-1], test_size=0.2):
-    
-    print(f'started loading data {time.ctime()}')
-    
-    df = load_data()
-    df = sample_df(df, samples)
-    
-    print(f'finished loading data {time.ctime()}')
+def train_model(X_train, y_train, samples=None, max_depth=10, n_estimators=500, features=features[:-1], test_size=0.2):
     
     start_time = time.time()
     print(f'started training {time.ctime()}')
@@ -279,10 +276,6 @@ def train_model(samples=None, max_depth=10, n_estimators=500, features=features[
     pipe = Pipeline([('scaler', StandardScaler()),
                      ('model', model)])
     
-    X = df[features]
-    y = df['nom_cloud_id']
-    y = y.replace(cloud_map)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size)
     pipe.fit(X_train, y_train)
     
     end_time = time.time()
@@ -294,7 +287,7 @@ def train_model(samples=None, max_depth=10, n_estimators=500, features=features[
     joblib.dump(pipe, model_file)
     print(f'saved model: {model_file}')
     
-    return pipe, X_train, X_test, y_train, y_test
+    return pipe
 
 
 def output_model_info_csv(samples=None, test_size=0.2):
@@ -320,7 +313,7 @@ def output_model_info_csv(samples=None, test_size=0.2):
     
     for f in feature_sets:
         
-        X_train, X_test, y_train, y_test = split_data(df_samp, f, test_size)
+        X_train, X_test, y_train, y_test, _, _ = split_data(df_samp, f, test_size)
         
         for model in models:
 
@@ -381,7 +374,7 @@ def batch_run(samples=None, n_estimators=500, max_depth=20, test_size=0.2, featu
     
     model = xgb.XGBClassifier(n_estimators=n_estimators, max_depth=max_depth, use_label_encoder=False, eval_metric='merror')
         
-    X_train, X_test, y_train, y_test = split_data(df_samp, features, test_size)
+    X_train, X_test, y_train, y_test, _, _ = split_data(df_samp, features, test_size)
         
     pipe = Pipeline([('scaler', StandardScaler()),
                      ('model', model)])

@@ -24,7 +24,7 @@ if __name__ == '__main__':
 
     for dset in ('ghi', 'dni', 'dhi'):
         dset_out = dset if cloud_phase is None else f'{cloud_phase}_{dset}'
-        df[dset_out] = out[dset].flatten()
+        df[f'xgb_{dset_out}'] = out[dset].flatten()
 
     output_xgb_csv = os.path.join(cc.output_dir, 'mlclouds_all_data_xgb_results.csv')    
     df.to_csv(output_xgb_csv)
