@@ -25,7 +25,7 @@ import joblib
 
 from nsrdb.utilities.statistics import mae_perc, mbe_perc
 
-working_dir = '/projects/pxs/mlclouds/cloud_id/bnb/'
+working_dir = '/projects/pxs/mlclouds/cloud_id/bnb/data'
 output_dir = '/projects/pxs/mlclouds/cloud_id/bnb/output'
 
 cloud_map = {'clearsky': 0, 'water': 1, 'ice': 2}
@@ -108,8 +108,9 @@ def load_data(encode_flag=True):
     df = pd.read_csv(file_path)
     
     if encode_flag:
-        label_encoder = LabelEncoder()
-        df['flag'] = label_encoder.fit_transform(df['flag'])
+        #label_encoder = LabelEncoder()
+        df['flag'] = df['flag'].replace({'clear': 0, 'bad_cloud': 3, 'water_cloud': 1, 'ice_cloud': 2})
+        #label_encoder.fit_transform(df['flag'])
     return df
 
 
@@ -204,6 +205,8 @@ def output_new_csv(test_size=0.2, n_estimators=2500, max_depth=30, features=feat
 
     df['cloud_id_xgb'] = y_pred_all
     df['mask_xgb'] = mask
+
+    df['flag'] = df['flag'].replace({0: 'clear', 1: 'water_cloud', 2: 'ice_cloud', 3: 'bad_cloud'})
 
     csv_file = os.path.join(output_dir, 'mlclouds_all_data_xgb.csv')
     print(f'writing csv: {csv_file}')
