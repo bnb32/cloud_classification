@@ -7,17 +7,12 @@ from sklearn.model_selection import (train_test_split,
                                      GridSearchCV,
                                      StratifiedKFold)
 from sklearn.metrics import (confusion_matrix,
-                             plot_confusion_matrix)
+                             plot_confusion_matrix,
+                             log_loss)
 from sklearn.pipeline import Pipeline
-from sklearn.decomposition import PCA
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.svm import SVC
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.naive_bayes import GaussianNB
-from sklearn.ensemble import RandomForestClassifier
 import argparse
 import ast
 import time
@@ -27,6 +22,7 @@ from nsrdb.utilities.statistics import mae_perc, mbe_perc
 
 working_dir = '/projects/pxs/mlclouds/cloud_id/bnb/data'
 output_dir = '/projects/pxs/mlclouds/cloud_id/bnb/output'
+batch_model_info_file = f'{output_dir}/batch_model_info.csv'
 
 cloud_map = {'clearsky': 0, 'water': 1, 'ice': 2}
 
@@ -60,8 +56,8 @@ features = [
 
 
 feature_sets = [features, features[:-6], features[:-1], features[:-2]]
-n_estimators = [1500, 2000, 2500, 3000, 3500]
-max_depth = [30, 35, 40, 45, 50, 55, 60]
+n_estimators = [100, 500, 1000, 1500, 2000, 2500]
+max_depth = [5, 10, 15, 20, 25, 30, 35]
 
 param_dict = {}
 i=0
@@ -131,35 +127,6 @@ def sample_df(df, samples=None):
     else:
         df_samp = df
     return df_samp    
-
-
-def tune_parameters(test_size=0.2, features=features[:-1], samples=None):
-    
-    df = load_data()
-    df_samp = sample_df(df, samples)
-
-    model = xgb.XGBClassifier(use_label_encoder=False,
-                              eval_metric='merror',
-                              verbosity=2)
-    pipe = Pipeline([('scaler', StandardScaler()),
-                     ('model', model)])
-    
-    X = df_samp[features]
-    y = df_samp['nom_cloud_id']
-    y = y.replace(cloud_map)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size)
-    
-    param_grid = {'model__n_estimators': [500, 1000, 1500], 
-                  'model__max_depth': [5, 10, 15, 20, 25, 30]}
-    
-    kfold = StratifiedKFold(n_splits=3, shuffle=True, random_state=7)
-    grid_search = GridSearchCV(pipe, param_grid, scoring="neg_log_loss", n_jobs=-1, cv=kfold)
-    grid_result = grid_search.fit(X_train, y_train)
-    # summarize results
-    msg = f'Best: {grid_result.best_score_}, using {grid_result.best_params_}'
-    with open('./tune_parameters.log', 'w') as f:
-        f.write(msg)
-    f.close()    
 
 def output_new_csv(test_size=0.2, n_estimators=2500, max_depth=30, features=features[:-2], samples=None):
     
@@ -273,8 +240,7 @@ def train_model(X_train, y_train, samples=None, max_depth=10, n_estimators=500, 
         n_estimators=n_estimators,
         max_depth=max_depth,
         use_label_encoder=False,
-        eval_metric='merror',
-        verbosity=2)
+        eval_metric='merror')
     
     pipe = Pipeline([('scaler', StandardScaler()),
                      ('model', model)])
@@ -291,6 +257,47 @@ def train_model(X_train, y_train, samples=None, max_depth=10, n_estimators=500, 
     print(f'saved model: {model_file}')
     
     return pipe
+
+def get_architecture_info(pipe, X_train, X_test, y_train, y_test):
+    y_pred = pipe.predict(X_test)
+    cm = confusion_matrix(y_test, y_pred)
+    cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+    mae = mae_perc(y_test, y_pred)
+            
+    y_pred_binary = np.array([0 if y==0 else 1 for y in y_pred])
+    y_test_binary = np.array([0 if y==0 else 1 for y in y_test])
+            
+    binary_cm = confusion_matrix(y_test_binary, y_pred_binary)
+    binary_cm = binary_cm.astype('float') / binary_cm.sum(axis=1)[:, np.newaxis]
+            
+    params = pipe['model'].get_params()
+    n_estimators = params.get('n_estimators', None)
+    max_depth = params.get('max_depth', None)
+            
+    title = f'xgb_max_depth_{max_depth}'
+    title += f'_n_estimators_{n_estimators}_n_features_{len(f)}'
+    mean_accuracy = np.mean([cm[i][i] for i in range(cm.shape[0])])
+    binary_mean_accuracy = np.mean([binary_cm[i][i] for i in range(binary_cm.shape[0])])
+    val_loss = log_loss(y_test, pipe.predict_proba(X_test))
+    train_loss = log_loss(y_train, pipe.predict_proba(X_train))
+    diff_loss = np.abs(val_loss - train_loss)
+    score = pipe.score(X_test, y_test)
+    new_row = {
+        'n_estimators': n_estimators,
+        'max_depth': max_depth,
+        'title': title,
+        'model': pipe['model'].__class__.__name__,
+        'features': len(f),                       
+        'mae': mae,
+        'score': score,
+        'confusion_matrix': np.array(cm),
+        'binary_confusion_matrix': np.array(binary_cm),
+        'mean_accuracy': mean_accuracy,
+        'binary_mean_accuracy': binary_mean_accuracy,
+        'val_loss': val_loss,
+        'train_loss': train_loss,
+        'diff_loss': diff_loss}
+    return new_row
 
 
 def output_model_info_csv(samples=None, test_size=0.2):
@@ -325,38 +332,8 @@ def output_model_info_csv(samples=None, test_size=0.2):
   
 
             pipe.fit(X_train, y_train)
-            y_pred = pipe.predict(X_test)
-            cm = confusion_matrix(y_test, y_pred)
-            cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-            mae = mae_perc(y_test, y_pred)
             
-            y_pred_binary = np.array([0 if y==0 else 1 for y in y_pred])
-            y_test_binary = np.array([0 if y==0 else 1 for y in y_test])
-            
-            binary_cm = confusion_matrix(y_test_binary, y_pred_binary)
-            binary_cm = binary_cm.astype('float') / binary_cm.sum(axis=1)[:, np.newaxis]
-            
-            params = model.get_params()
-            n_estimators = params.get('n_estimators', None)
-            max_depth = params.get('max_depth', None)
-            
-            title = f'xgb_max_depth_{max_depth}'
-            title += f'_n_estimators_{n_estimators}_n_features_{len(f)}'
-            mean_accuracy = np.mean([cm[i][i] for i in range(cm.shape[0])])
-            binary_mean_accuracy = np.mean([binary_cm[i][i] for i in range(binary_cm.shape[0])])
-            score = pipe.score(X_test, y_test)
-            new_row = {
-                       'n_estimators': n_estimators,
-                       'max_depth': max_depth,
-                       'title': title,
-                       'model': model.__class__.__name__,
-                       'features': len(f),                       
-                       'mae': mae,
-                       'score': score,
-                       'confusion_matrix': np.array(cm),
-                       'binary_confusion_matrix': np.array(binary_cm),
-                       'mean_accuracy': mean_accuracy,
-                       'binary_mean_accuracy': binary_mean_accuracy}
+            new_row = get_architecture_info(pipe, X_train, X_test, y_train, y_test)
             model_info = model_info.append(new_row, ignore_index=True)
             print(f'Added {new_row["title"]}')
     
@@ -382,50 +359,21 @@ def batch_run(samples=None, n_estimators=500, max_depth=20, test_size=0.2, featu
     pipe = Pipeline([('scaler', StandardScaler()),
                      ('model', model)])
   
-
     pipe.fit(X_train, y_train)
-    y_pred = pipe.predict(X_test)
-    cm = confusion_matrix(y_test, y_pred)
-    cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-    mae = mae_perc(y_test, y_pred)
-            
-    y_pred_binary = np.array([0 if y==0 else 1 for y in y_pred])
-    y_test_binary = np.array([0 if y==0 else 1 for y in y_test])
-            
-    binary_cm = confusion_matrix(y_test_binary, y_pred_binary)
-    binary_cm = binary_cm.astype('float') / binary_cm.sum(axis=1)[:, np.newaxis]
-            
-    params = model.get_params()
-    n_estimators = params.get('n_estimators', None)
-    max_depth = params.get('max_depth', None)
-            
-    title = f'xgb_max_depth_{max_depth}'
-    title += f'_n_estimators_{n_estimators}_n_features_{len(f)}'
-    mean_accuracy = np.mean([cm[i][i] for i in range(cm.shape[0])])
-    binary_mean_accuracy = np.mean([binary_cm[i][i] for i in range(binary_cm.shape[0])])
-    score = pipe.score(X_test, y_test)
-    new_row = {
-               'n_estimators': n_estimators,
-               'max_depth': max_depth,
-               'title': title,
-               'model': model.__class__.__name__,
-               'features': len(f),                       
-               'mae': mae,
-               'score': score,
-               'confusion_matrix': np.array(cm),
-               'binary_confusion_matrix': np.array(binary_cm),
-               'mean_accuracy': mean_accuracy,
-               'binary_mean_accuracy': binary_mean_accuracy}
+    new_row = get_architecture_info(pipe, X_train, X_test, y_train, y_test)
     model_info = model_info.append(new_row, ignore_index=True)
     print(f'Added {new_row["title"]}')
-    print(f'mean_accuracy: {mean_accuracy}')
-    print(f'score: {score}')
+    print(f'mean_accuracy: {new_row["mean_accuracy"]}')
+    print(f'binary_mean_accuracy: {new_row["binary_mean_accuracy"]}')
+    print(f'score: {new_row["score"]}')
+    print(f'val_loss: {new_row["val_loss"]}')  
+    print(f'train_loss: {new_row["train_loss"]}')  
+    print(f'diff_loss: {new_row["diff_loss"]}')   
     
-    csv_file = os.path.join(output_dir, 'batch_model_info.csv')
-    if os.path.exists(csv_file):
-        model_info.to_csv(csv_file, mode='a', header=False)
+    if os.path.exists(batch_model_info_file):
+        model_info.to_csv(batch_model_info_file, mode='a', header=False)
     else:
-        model_info.to_csv(csv_file)
+        model_info.to_csv(batch_model_info_file)
     
 def load_model_info_csv():
     df = pd.read_csv('./model_info.csv')
@@ -464,6 +412,8 @@ if __name__=='__main__':
                   samples=args.samples)
         
     if args.batch_search:
+        os.system(f'rm -f {batch_model_info_file}')
+        print(f'removing previous info file: {batch_model_info_file}')
         for id_ in param_dict:
             os.system(f'sbatch ./batch_script.sh {id_} {args.samples}')
             
