@@ -56,8 +56,8 @@ features = [
 
 
 feature_sets = [features, features[:-6], features[:-1], features[:-2]]
-n_estimators = [100, 500, 1000, 1500, 2000, 2500]
-max_depth = [5, 10, 15, 20, 25, 30, 35]
+n_estimators = [10, 50, 100, 500, 1000, 1500, 2000, 2500]
+max_depth = [2, 3, 4, 5, 10, 15, 20, 25, 30, 35]
 
 param_dict = {}
 i=0
@@ -97,11 +97,9 @@ def from_np_array(array_string):
     return np.array(ast.literal_eval(array_string))
 
 
-def load_data(encode_flag=True):
+def load_data(file_name=f'{working_dir}/mlclouds_all_data.csv', encode_flag=True):
     
-    file_name = 'mlclouds_all_data.csv'
-    file_path = os.path.join(working_dir, file_name)
-    df = pd.read_csv(file_path)
+    df = pd.read_csv(file_name)
     
     if encode_flag:
         #label_encoder = LabelEncoder()
@@ -258,7 +256,7 @@ def train_model(X_train, y_train, samples=None, max_depth=10, n_estimators=500, 
     
     return pipe
 
-def get_architecture_info(pipe, X_train, X_test, y_train, y_test):
+def get_architecture_info(pipe, X_train, X_test, y_train, y_test, features):
     y_pred = pipe.predict(X_test)
     cm = confusion_matrix(y_test, y_pred)
     cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
@@ -275,7 +273,7 @@ def get_architecture_info(pipe, X_train, X_test, y_train, y_test):
     max_depth = params.get('max_depth', None)
             
     title = f'xgb_max_depth_{max_depth}'
-    title += f'_n_estimators_{n_estimators}_n_features_{len(f)}'
+    title += f'_n_estimators_{n_estimators}_n_features_{len(features)}'
     mean_accuracy = np.mean([cm[i][i] for i in range(cm.shape[0])])
     binary_mean_accuracy = np.mean([binary_cm[i][i] for i in range(binary_cm.shape[0])])
     val_loss = log_loss(y_test, pipe.predict_proba(X_test))
@@ -287,7 +285,7 @@ def get_architecture_info(pipe, X_train, X_test, y_train, y_test):
         'max_depth': max_depth,
         'title': title,
         'model': pipe['model'].__class__.__name__,
-        'features': len(f),                       
+        'features': len(features),                       
         'mae': mae,
         'score': score,
         'confusion_matrix': np.array(cm),
@@ -333,7 +331,7 @@ def output_model_info_csv(samples=None, test_size=0.2):
 
             pipe.fit(X_train, y_train)
             
-            new_row = get_architecture_info(pipe, X_train, X_test, y_train, y_test)
+            new_row = get_architecture_info(pipe, X_train, X_test, y_train, y_test, f)
             model_info = model_info.append(new_row, ignore_index=True)
             print(f'Added {new_row["title"]}')
     
@@ -360,7 +358,7 @@ def batch_run(samples=None, n_estimators=500, max_depth=20, test_size=0.2, featu
                      ('model', model)])
   
     pipe.fit(X_train, y_train)
-    new_row = get_architecture_info(pipe, X_train, X_test, y_train, y_test)
+    new_row = get_architecture_info(pipe, X_train, X_test, y_train, y_test, features)
     model_info = model_info.append(new_row, ignore_index=True)
     print(f'Added {new_row["title"]}')
     print(f'mean_accuracy: {new_row["mean_accuracy"]}')
@@ -375,8 +373,8 @@ def batch_run(samples=None, n_estimators=500, max_depth=20, test_size=0.2, featu
     else:
         model_info.to_csv(batch_model_info_file)
     
-def load_model_info_csv():
-    df = pd.read_csv('./model_info.csv')
+def load_model_info_csv(file_name=f'{output_dir}/batch_model_info.csv'):
+    df = pd.read_csv(file_name)
     df['confusion_matrix'] = df['confusion_matrix'].apply(from_np_array)
     df['binary_confusion_matrix'] = df['binary_confusion_matrix'].apply(from_np_array)
     return df
