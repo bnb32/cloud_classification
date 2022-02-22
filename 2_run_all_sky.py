@@ -24,7 +24,7 @@ if __name__ == '__main__':
     out = all_sky(**all_sky_input)
 
     for dset in ('ghi', 'dni', 'dhi'):
-        df[f'xgb_results_{dset}'] = out[dset].flatten()
+        df[f'xgb_{dset}'] = out[dset].flatten()
 
     output_xgb_csv = os.path.join(cc.output_dir, 'mlclouds_all_data_xgb_results.csv')    
     df.to_csv(output_xgb_csv)
