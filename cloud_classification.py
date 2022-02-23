@@ -56,8 +56,8 @@ features = [
 
 
 feature_sets = [features, features[:-6], features[:-1], features[:-2]]
-n_estimators = [10, 50, 100, 500, 1000, 1500, 2000, 2500]
-max_depth = [2, 3, 4, 5, 10, 15, 20, 25, 30, 35]
+n_estimators = [10, 25, 50, 75, 100, 500, 1000, 1500, 2000, 2500, 3000]
+max_depth = [2, 3, 4, 5, 10, 15, 20, 25, 30, 35, 40]
 
 param_dict = {}
 i=0
@@ -126,7 +126,8 @@ def sample_df(df, samples=None):
         df_samp = df
     return df_samp    
 
-def output_new_csv(test_size=0.2, n_estimators=2500, max_depth=30, features=features[:-2], samples=None):
+def output_new_csv(test_size=0.2, n_estimators=75, max_depth=5,
+                   features=features[:-6], samples=None):
     
     print(f'started loading data {time.ctime()}')
     
@@ -136,11 +137,15 @@ def output_new_csv(test_size=0.2, n_estimators=2500, max_depth=30, features=feat
     print(f'finished loading data {time.ctime()}')
     X_train, X_test, y_train, y_test, indices_train, indices_test = split_data(df, features, test_size) 
     
+    title = get_model_title(max_depth=max_depth, n_estimators=n_estimators,
+                            features=features)
+    
     pipe = train_model(
         X_train, y_train,
         samples=samples, max_depth=max_depth,
         n_estimators=n_estimators,
-        features=features, test_size=test_size)
+        features=features, test_size=test_size,
+        save_model=True, model_name=title)
     
     y_pred_all = np.zeros((len(indices_train) + len(indices_test)))
     y_pred_all[indices_train] = pipe.predict(X_train)
@@ -173,7 +178,7 @@ def output_new_csv(test_size=0.2, n_estimators=2500, max_depth=30, features=feat
 
     df['flag'] = df['flag'].replace({0: 'clear', 1: 'water_cloud', 2: 'ice_cloud', 3: 'bad_cloud'})
 
-    csv_file = os.path.join(output_dir, 'mlclouds_all_data_xgb.csv')
+    csv_file = os.path.join(output_dir, f'{title}_data.csv')
     print(f'writing csv: {csv_file}')
     
     df.to_csv(csv_file)
@@ -223,7 +228,9 @@ def plot_wisconsin_binary_cm():
     plot_binary_cm(cm, 'Wisconsin Confusion Matrix')
 
     
-def train_model(X_train, y_train, samples=None, max_depth=10, n_estimators=500, features=features[:-1], test_size=0.2):
+def train_model(X_train, y_train, samples=None, max_depth=10,
+                n_estimators=500, features=features[:-1],
+                test_size=0.2, save_model=True, model_name='model'):
     
     start_time = time.time()
     print(f'started training {time.ctime()}')
@@ -250,11 +257,17 @@ def train_model(X_train, y_train, samples=None, max_depth=10, n_estimators=500, 
     print(f'finished training {time.ctime()}')
     print(f'time elapsed: {time_elapsed}')
     
-    model_file = os.path.join(output_dir, 'model.pkl')
-    joblib.dump(pipe, model_file)
-    print(f'saved model: {model_file}')
+    model_file = os.path.join(output_dir, f'{model_name}.pkl')
+    if save_model:
+        joblib.dump(pipe, model_file)
+        print(f'saved model: {model_file}')
     
     return pipe
+
+def get_model_title(max_depth=5, n_estimators=75, features=features[:-2]):
+    title = f'xgb_max_depth_{max_depth}'
+    title += f'_n_estimators_{n_estimators}_n_features_{len(features)}'
+    return title
 
 def get_architecture_info(pipe, X_train, X_test, y_train, y_test, features):
     y_pred = pipe.predict(X_test)
@@ -272,13 +285,15 @@ def get_architecture_info(pipe, X_train, X_test, y_train, y_test, features):
     n_estimators = params.get('n_estimators', None)
     max_depth = params.get('max_depth', None)
             
-    title = f'xgb_max_depth_{max_depth}'
-    title += f'_n_estimators_{n_estimators}_n_features_{len(features)}'
+    title = get_model_title(max_depth=max_depth, n_estimators=n_estimators,
+                            features=features)
     mean_accuracy = np.mean([cm[i][i] for i in range(cm.shape[0])])
     binary_mean_accuracy = np.mean([binary_cm[i][i] for i in range(binary_cm.shape[0])])
     val_loss = log_loss(y_test, pipe.predict_proba(X_test))
     train_loss = log_loss(y_train, pipe.predict_proba(X_train))
     diff_loss = np.abs(val_loss - train_loss)
+    ratio_loss = diff_loss / np.mean([val_loss, train_loss])
+    mean_loss = np.mean([ratio_loss, val_loss])
     score = pipe.score(X_test, y_test)
     new_row = {
         'n_estimators': n_estimators,
@@ -294,7 +309,9 @@ def get_architecture_info(pipe, X_train, X_test, y_train, y_test, features):
         'binary_mean_accuracy': binary_mean_accuracy,
         'val_loss': val_loss,
         'train_loss': train_loss,
-        'diff_loss': diff_loss}
+        'diff_loss': diff_loss,
+        'ratio_loss': ratio_loss,
+        'mean_loss': mean_loss}
     return new_row
 
 
