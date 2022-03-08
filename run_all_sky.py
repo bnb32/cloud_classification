@@ -6,7 +6,14 @@ from nsrdb.all_sky.all_sky import all_sky, ALL_SKY_ARGS
 import cloud_classification as cc
 
 if __name__ == '__main__':
-    input_file = 'xgb_max_depth_5_n_estimators_75_n_features_19_data.csv'
+    input_file = 'xgb_max_depth_4_n_estimators_2000_n_features_23_data.csv' 
+    # 'xgb_max_depth_3_n_estimators_1500_n_features_24_data.csv' 
+    # 'xgb_max_depth_4_n_estimators_30_n_features_23_data.csv' 
+    # 'xgb_max_depth_4_n_estimators_1000_n_features_24_data.csv' 
+    # 'xgb_max_depth_4_n_estimators_10_n_features_23_data.csv' 
+    # 'xgb_max_depth_15_n_estimators_500_n_features_23_data.csv' 
+    # 'xgb_max_depth_3_n_estimators_500_n_features_23_data.csv' 
+    # 'xgb_max_depth_5_n_estimators_75_n_features_19_data.csv'
     xgb_csv = os.path.join(cc.output_dir, input_file)
     print(f'loading {xgb_csv}')
     df = pd.read_csv(xgb_csv, index_col=0)
